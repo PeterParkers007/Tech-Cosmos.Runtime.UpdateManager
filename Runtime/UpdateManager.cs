@@ -11,8 +11,11 @@ namespace ZJM_Optimize.Runtime
         private static List<IObserverFixedUpdate> _obseverFixeds = new List<IObserverFixedUpdate>();
         private static List<IObserverFixedUpdate> _pendingObserverFixeds = new List<IObserverFixedUpdate>();
 
+        private static List<IObserverLateUpdate> _obseverLates = new List<IObserverLateUpdate>();
+        private static List<IObserverLateUpdate> _pendingObserverLates = new List<IObserverLateUpdate>();
         private static int _currentObserverIndex;
         private static int _currentObserverFixedIndex;
+        private static int _currentObserverLateIndex;
         private void Update()
         {
             for (_currentObserverIndex = _observers.Count - 1; _currentObserverIndex >= 0; _currentObserverIndex--)
@@ -31,6 +34,15 @@ namespace ZJM_Optimize.Runtime
             _obseverFixeds.AddRange(_pendingObserverFixeds);
             _pendingObserverFixeds.Clear();
         }
+        private void LateUpdate()
+        {
+            for (_currentObserverLateIndex = _obseverLates.Count - 1; _currentObserverLateIndex >= 0; _currentObserverLateIndex--)
+            {
+                _obseverLates[_currentObserverLateIndex].ObserverLateUpdate();
+            }
+            _obseverLates.AddRange(_pendingObserverLates);
+            _pendingObserverLates.Clear();
+        }
         public static void RegisterObserverUpdate(IObserverUpdate observer)
         {
             _pendingObservers.Add(observer);
@@ -38,6 +50,10 @@ namespace ZJM_Optimize.Runtime
         public static void RegisterObserverFixedUpdate(IObserverFixedUpdate obseverFixed)
         {
             _pendingObserverFixeds.Add(obseverFixed);
+        }
+        public static void RegisterObserverLateUpdate(IObserverLateUpdate obseverLate)
+        {
+            _pendingObserverLates.Add(obseverLate);
         }
         public static void UnRegisterObserverUpdate(IObserverUpdate observer)
         {
@@ -48,7 +64,11 @@ namespace ZJM_Optimize.Runtime
         {
             _obseverFixeds.Remove(obseverFixed);
             _currentObserverFixedIndex--;
-
+        }
+        public static void UnRegisterObserverLateUpdate(IObserverLateUpdate obseverLate)
+        {
+            _obseverLates.Remove(obseverLate);
+            _currentObserverLateIndex--;
         }
     }
 }
