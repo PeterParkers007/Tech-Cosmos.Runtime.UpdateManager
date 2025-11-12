@@ -1,4 +1,4 @@
-# ZJM UpdateManager 统一更新管理系统
+# UpdateManager 统一更新管理系统
 
 一个高性能的 Unity 更新管理系统，通过观察者模式集中处理 Update、FixedUpdate 和 LateUpdate，显著提升游戏性能。
 
