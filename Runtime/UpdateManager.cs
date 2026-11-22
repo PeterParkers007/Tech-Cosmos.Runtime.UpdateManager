@@ -1,167 +1,244 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using ZJM_Optimize.Runtime.Interfaces;
 
 namespace ZJM_Optimize.Runtime
 {
+    /// <summary>
+    /// 统一更新管理器。
+    /// 公开 API 与旧版完全一致；内部由“List + 线性判重 + RemoveAt”改为
+    /// “List 保序 + Dictionary 定位 + 墓碑注销 + 帧末稳定压缩”。
+    /// 遍历顺序（注册逆序）、帧边界语义、销毁兜底行为均与旧版保持一致。
+    /// </summary>
     public class UpdateManager : MonoBehaviour
     {
-        private static readonly List<IObserverUpdate> _observers = new();
-        private static readonly List<IObserverUpdate> _pendingObservers = new();
-
-        private static readonly List<IObserverFixedUpdate> _obseverFixeds = new();
-        private static readonly List<IObserverFixedUpdate> _pendingObserverFixeds = new();
-
-        private static readonly List<IObserverLateUpdate> _obseverLates = new();
-        private static readonly List<IObserverLateUpdate> _pendingObserverLates = new();
-
-        private static int _currentObserverIndex;
-        private static int _currentObserverFixedIndex;
-        private static int _currentObserverLateIndex;
+        private static readonly ObserverGroup<IObserverUpdate> _updates = new ObserverGroup<IObserverUpdate>();
+        private static readonly ObserverGroup<IObserverFixedUpdate> _fixeds = new ObserverGroup<IObserverFixedUpdate>();
+        private static readonly ObserverGroup<IObserverLateUpdate> _lates = new ObserverGroup<IObserverLateUpdate>();
 
         private void Update()
         {
-            FlushPending(_observers, _pendingObservers);
-            for (_currentObserverIndex = _observers.Count - 1; _currentObserverIndex >= 0; _currentObserverIndex--)
+            var group = _updates;
+            var count = group.Count;
+            for (var i = count - 1; i >= 0; i--)
             {
-                var observer = _observers[_currentObserverIndex];
-                if (IsDestroyed(observer))
+                var observer = group[i];
+                if (observer == null)
+                    continue;
+
+                if (ObserverUtil.IsDestroyed(observer))
                 {
-                    _observers.RemoveAt(_currentObserverIndex);
+                    group.MarkDead(i);
                     continue;
                 }
 
                 observer.ObserverUpdate();
             }
+
+            group.CompactIfNeeded();
         }
 
         private void FixedUpdate()
         {
-            FlushPending(_obseverFixeds, _pendingObserverFixeds);
-            for (_currentObserverFixedIndex = _obseverFixeds.Count - 1; _currentObserverFixedIndex >= 0; _currentObserverFixedIndex--)
+            var group = _fixeds;
+            var count = group.Count;
+            for (var i = count - 1; i >= 0; i--)
             {
-                var observer = _obseverFixeds[_currentObserverFixedIndex];
-                if (IsDestroyed(observer))
+                var observer = group[i];
+                if (observer == null)
+                    continue;
+
+                if (ObserverUtil.IsDestroyed(observer))
                 {
-                    _obseverFixeds.RemoveAt(_currentObserverFixedIndex);
+                    group.MarkDead(i);
                     continue;
                 }
 
                 observer.ObserverFixedUpdate();
             }
+
+            group.CompactIfNeeded();
         }
 
         private void LateUpdate()
         {
-            FlushPending(_obseverLates, _pendingObserverLates);
-            for (_currentObserverLateIndex = _obseverLates.Count - 1; _currentObserverLateIndex >= 0; _currentObserverLateIndex--)
+            var group = _lates;
+            var count = group.Count;
+            for (var i = count - 1; i >= 0; i--)
             {
-                var observer = _obseverLates[_currentObserverLateIndex];
-                if (IsDestroyed(observer))
+                var observer = group[i];
+                if (observer == null)
+                    continue;
+
+                if (ObserverUtil.IsDestroyed(observer))
                 {
-                    _obseverLates.RemoveAt(_currentObserverLateIndex);
+                    group.MarkDead(i);
                     continue;
                 }
 
                 observer.ObserverLateUpdate();
             }
+
+            group.CompactIfNeeded();
         }
 
         public static void RegisterObserverUpdate(IObserverUpdate observer)
-            => Register(observer, _observers, _pendingObservers);
-
-        public static void RegisterObserverFixedUpdate(IObserverFixedUpdate observer)
-            => Register(observer, _obseverFixeds, _pendingObserverFixeds);
-
-        public static void RegisterObserverLateUpdate(IObserverLateUpdate observer)
-            => Register(observer, _obseverLates, _pendingObserverLates);
-
-        public static void UnRegisterObserverUpdate(IObserverUpdate observer)
-            => UnRegister(observer, _observers, _pendingObservers, ref _currentObserverIndex);
-
-        public static void UnRegisterObserverFixedUpdate(IObserverFixedUpdate observer)
-            => UnRegister(observer, _obseverFixeds, _pendingObserverFixeds, ref _currentObserverFixedIndex);
-
-        public static void UnRegisterObserverLateUpdate(IObserverLateUpdate observer)
-            => UnRegister(observer, _obseverLates, _pendingObserverLates, ref _currentObserverLateIndex);
-
-        static void Register<T>(T observer, List<T> active, List<T> pending) where T : class
         {
-            if (observer == null || IsDestroyed(observer))
-                return;
-            if (ContainsRef(active, observer) || ContainsRef(pending, observer))
-                return;
-
-            pending.Add(observer);
+            _updates.Register(observer);
         }
 
-        static void UnRegister<T>(T observer, List<T> active, List<T> pending, ref int currentIndex) where T : class
+        public static void RegisterObserverFixedUpdate(IObserverFixedUpdate observer)
+        {
+            _fixeds.Register(observer);
+        }
+
+        public static void RegisterObserverLateUpdate(IObserverLateUpdate observer)
+        {
+            _lates.Register(observer);
+        }
+
+        public static void UnRegisterObserverUpdate(IObserverUpdate observer)
+        {
+            _updates.UnRegister(observer);
+        }
+
+        public static void UnRegisterObserverFixedUpdate(IObserverFixedUpdate observer)
+        {
+            _fixeds.UnRegister(observer);
+        }
+
+        public static void UnRegisterObserverLateUpdate(IObserverLateUpdate observer)
+        {
+            _lates.UnRegister(observer);
+        }
+    }
+
+    internal static class ObserverUtil
+    {
+        /// <summary>
+        /// Unity 销毁的 Object 通过接口引用时不会走 fake-null，必须显式检测。
+        /// 与旧实现 `observer is Object u &amp;&amp; u == null` 语义等价。
+        /// </summary>
+        public static bool IsDestroyed(object observer)
+        {
+            var unityObject = observer as UnityEngine.Object;
+            if (ReferenceEquals(unityObject, null))
+                return false;
+
+            return unityObject == null;
+        }
+    }
+
+    /// <summary>
+    /// 按引用身份比较。Dictionary 默认比较器会走 object.Equals，
+    /// 而 UnityEngine.Object 与业务类都可能重写它，这里必须锁死引用语义。
+    /// </summary>
+    internal sealed class RefComparer<T> : IEqualityComparer<T> where T : class
+    {
+        public static readonly RefComparer<T> Instance = new RefComparer<T>();
+
+        public bool Equals(T x, T y)
+        {
+            return ReferenceEquals(x, y);
+        }
+
+        public int GetHashCode(T obj)
+        {
+            return RuntimeHelpers.GetHashCode(obj);
+        }
+    }
+
+    /// <summary>
+    /// 一个更新阶段的观察者表。
+    /// 不变量：
+    ///   1. _items 保序，是唯一的遍历顺序来源；
+    ///   2. _slotOf 是 O(1) 的成员判定与槽位索引，_items[i] 与 _slotOf 一一对应；
+    ///   3. 注销只把槽位置空（墓碑），不在遍历中移动元素；
+    ///   4. 压缩只发生在遍历结束后，且是稳定压缩（顺序不变）。
+    /// </summary>
+    internal sealed class ObserverGroup<T> where T : class
+    {
+        private const int CompactMinDead = 32;
+
+        private readonly List<T> _items = new List<T>();
+        private readonly Dictionary<T, int> _slotOf = new Dictionary<T, int>(RefComparer<T>.Instance);
+
+        private int _dead;
+
+        public int Count
+        {
+            get { return _items.Count; }
+        }
+
+        public T this[int index]
+        {
+            get { return _items[index]; }
+        }
+
+        public void Register(T observer)
+        {
+            if (observer == null || ObserverUtil.IsDestroyed(observer))
+                return;
+
+            if (_slotOf.ContainsKey(observer))
+                return;
+
+            _slotOf.Add(observer, _items.Count);
+            _items.Add(observer);
+        }
+
+        public void UnRegister(T observer)
         {
             if (observer == null)
                 return;
 
-            RemoveAllRefs(active, observer, ref currentIndex);
-            RemoveAllRefs(pending, observer);
-        }
-
-        static void FlushPending<T>(List<T> active, List<T> pending) where T : class
-        {
-            if (pending.Count == 0)
+            int slot;
+            if (!_slotOf.TryGetValue(observer, out slot))
                 return;
 
-            for (var i = 0; i < pending.Count; i++)
-            {
-                var observer = pending[i];
-                if (observer == null || IsDestroyed(observer))
-                    continue;
-                if (ContainsRef(active, observer))
-                    continue;
-
-                active.Add(observer);
-            }
-
-            pending.Clear();
+            _slotOf.Remove(observer);
+            _items[slot] = null;
+            _dead++;
         }
 
-        static bool ContainsRef<T>(List<T> list, T item) where T : class
+        /// <summary>遍历时发现漏注销的已销毁对象，就地立墓碑（不移动元素）。</summary>
+        public void MarkDead(int index)
         {
-            for (var i = 0; i < list.Count; i++)
-            {
-                if (ReferenceEquals(list[i], item))
-                    return true;
-            }
+            var observer = _items[index];
+            if (observer == null)
+                return;
 
-            return false;
-        }
-
-        static void RemoveAllRefs<T>(List<T> list, T item) where T : class
-        {
-            for (var i = list.Count - 1; i >= 0; i--)
-            {
-                if (ReferenceEquals(list[i], item))
-                    list.RemoveAt(i);
-            }
-        }
-
-        static void RemoveAllRefs<T>(List<T> list, T item, ref int currentIndex) where T : class
-        {
-            for (var i = list.Count - 1; i >= 0; i--)
-            {
-                if (!ReferenceEquals(list[i], item))
-                    continue;
-
-                list.RemoveAt(i);
-                if (i <= currentIndex)
-                    currentIndex--;
-            }
+            _items[index] = null;
+            _slotOf.Remove(observer);
+            _dead++;
         }
 
         /// <summary>
-        /// Unity 销毁的 Object 通过接口引用时不会走 fake-null，必须显式检测。
+        /// 稳定压缩：墓碑占比超过 1/4 且数量超过下限时，一次性回收。
+        /// 必须在遍历结束后调用，不能在遍历中调用。
         /// </summary>
-        static bool IsDestroyed(object observer)
+        public void CompactIfNeeded()
         {
-            return observer is Object unityObject && unityObject == null;
+            if (_dead < CompactMinDead || _dead * 4 < _items.Count)
+                return;
+
+            var write = 0;
+            for (var read = 0; read < _items.Count; read++)
+            {
+                var observer = _items[read];
+                if (observer == null)
+                    continue;
+
+                _items[write] = observer;
+                _slotOf[observer] = write;
+                write++;
+            }
+
+            if (write < _items.Count)
+                _items.RemoveRange(write, _items.Count - write);
+
+            _dead = 0;
         }
     }
 }

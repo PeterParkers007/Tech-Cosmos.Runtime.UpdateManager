@@ -348,10 +348,10 @@ public class DebugUpdateManager : MonoBehaviour
     // 通过反射获取实际数量（仅用于调试）
     private int GetObserverCount()
     {
-        var field = typeof(UpdateManager).GetField("_observers", 
+        var field = typeof(UpdateManager).GetField("_updates",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        var list = (List<IObserverUpdate>)field.GetValue(null);
-        return list.Count;
+        var group = field.GetValue(null);
+        return (int)group.GetType().GetProperty("Count").GetValue(group, null);
     }
 }
 ```
